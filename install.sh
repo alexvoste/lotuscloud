@@ -66,9 +66,18 @@ else
 fi
 
 
-# Включаем SSH и Docker
-systemctl enable --now ssh
+# Включаем SSH (пробуем ssh, если нет - sshd)
+if systemctl list-unit-files | grep -q "^ssh.service"; then
+    systemctl enable --now ssh
+elif systemctl list-unit-files | grep -q "^sshd.service"; then
+    systemctl enable --now sshd
+else
+    echo -e "${RED}⚠️ SSH сервис не найден, проверьте установку openssh${NC}"
+fi
+
+# Включаем Docker
 systemctl enable --now docker
+
 
 # 3. ДЕПЛОЙ MARZBAN-NODE
 echo -e "\n${BOLD}[2/4] Развертывание транспортного узла Marzban...${NC}"
