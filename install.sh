@@ -23,10 +23,10 @@ echo -e "${CYAN}${BOLD}🪷 LOTUS CLOUD | Infrastructure Initialization...${NC}"
 
 # 1. ПРОВЕРКА СЕТИ
 echo -e "\n${BOLD}[1/4] Диагностика сетевого окружения...${NC}"
-PUBLIC_IP=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org)
+PUBLIC_IP=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org || echo "unknown")
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 
-if [ -z "$PUBLIC_IP" ]; then
+if [[ "$PUBLIC_IP" == "unknown" ]]; then
     echo -e "${RED}❌ Нет доступа к сети. Проверьте подключение.${NC}"
     exit 1
 fi
@@ -38,38 +38,38 @@ else
     echo -e "${GREEN}✅ Инфраструктура готова: Обнаружен прямой доступ.${NC}"
 fi
 
-# 2. УСТАНОВКА ЗАВИСИМОСТЕЙ (Универсальная)
+# 2. УСТАНОВКА ЗАВИСИМОСТЕЙ
 echo -e "\n${BOLD}[2/4] Подготовка системных компонентов...${NC}"
 
-if [ -f /etc/arch-release ]; then
-    pacman -Syu --noconfirm docker docker-compose curl openssh
-elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
-    apt-get update && apt-get install -y docker.io docker-compose curl openssh-server
-elif [ -f /etc/redhat-release ]; then
-    dnf install -y docker docker-compose curl openssh-server || yum install -y docker docker-compose curl openssh-server
+# Проверяем, стоит ли уже Docker, чтобы не терять время
+if ! command -v docker &> /dev/null; then
+    echo -e "Установка Docker..."
+    if [ -f /etc/arch-release ]; then
+        pacman -Syu --noconfirm docker docker-compose curl openssh
+    elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
+        apt-get update && apt-get install -y docker.io docker-compose curl openssh-server
+    elif [ -f /etc/redhat-release ]; then
+        dnf install -y docker docker-compose curl openssh-server || yum install -y docker docker-compose curl openssh-server
+    else
+        # Универсальный скрипт установки от докера, если система специфичная
+        curl -fsSL https://get.docker.com | sh
+    fi
+    systemctl enable --now docker
 else
-    echo -e "${RED}Неизвестная система. Попробуйте установить Docker вручную.${NC}"
+    echo -e "${GREEN}✅ Docker уже установлен.${NC}"
 fi
 
-# Запуск Docker
-systemctl enable --now docker
-
-# 3. АВТОРИЗАЦИЯ И КЛЮЧИ
+# 3. АВТОРИЗАЦИЯ
 echo -e "\n${BOLD}[3/4] Регистрация в реестре Lotus Cloud...${NC}"
 
-if [ -z "$1" ]; then
+# Если ID передан аргументом - берем его, если нет - запрашиваем
+NODE_ID=${1:-}
+if [ -z "$NODE_ID" ]; then
     echo -en "${CYAN}Введите ваш NODE_ID из @lotus_x_bot: ${NC}"
-    read NODE_ID
-else
-    NODE_ID=$1
+    read -r NODE_ID
 fi
 
 if [ -z "$NODE_ID" ]; then echo -e "${RED}ID не указан. Отмена.${NC}"; exit 1; fi
-
-# Генерация ключа идентификации
-if [ ! -f ~/.ssh/id_lotus ]; then
-    ssh-keygen -t ed25519 -f ~/.ssh/id_lotus -N "" -q
-fi
 
 # 4. ДЕПЛОЙ КОНТЕЙНЕРА
 echo -e "\n${BOLD}[4/4] Развертывание транспортного узла...${NC}"
@@ -78,13 +78,17 @@ NODE_DIR="/opt/lotus-node"
 mkdir -p "$NODE_DIR/data"
 cd "$NODE_DIR"
 
-# Скачиваем защищенный конфиг Xray из репозитория
+# Скачиваем защищенный конфиг Xray
 echo "Загрузка конфигурации безопасности..."
-curl -sSL https://raw.githubusercontent.com/alexvoste/lotuscloud/main/components/configs/xray_config.json > "$NODE_DIR/data/config.json"
+# Добавил флаг -f чтобы curl падал при 404, и -o для ясности
+if ! curl -sSLf "https://raw.githubusercontent.com/alexvoste/lotuscloud/main/components/configs/xray_config.json" -o "$NODE_DIR/data/config.json"; then
+    echo -e "${RED}❌ Ошибка: Не удалось скачать конфиг. Проверь ссылку на GitHub!${NC}"
+    exit 1
+fi
 
 # Создаем docker-compose.yml
+# Используем актуальный синтаксис (без version, сейчас это стандарт)
 cat <<EOF > docker-compose.yml
-version: '3.9'
 services:
   lotus-node:
     image: mzzsfy/marzban-node:latest
@@ -99,8 +103,12 @@ services:
       - ./data:/var/lib/marzban-node
 EOF
 
-# Запуск
-docker-compose up -d
+# Запуск!!!
+if docker compose version &> /dev/null; then
+    docker compose up -d
+else
+    docker-compose up -d
+fi
 
 echo -e "\n${GREEN}${BOLD}✅ СИСТЕМА СТАБИЛИЗИРОВАНА. НОДА АКТИВНА!${NC}"
 echo -e "Node ID: ${CYAN}$NODE_ID${NC}"
