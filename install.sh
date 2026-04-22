@@ -65,17 +65,18 @@ else
     echo -e "${GREEN}✅ Шлюз уже активен.${NC}"
 fi
 
-
-# Включаем SSH (пробуем ssh, если нет - sshd)
+# Универсальный запуск SSH
 if systemctl list-unit-files | grep -q "^ssh.service"; then
     systemctl enable --now ssh
-elif systemctl list-unit-files | grep -q "^sshd.service"; then
+    echo -e "${GREEN}✅ Служба ssh запущена${NC}"
+elif systemctl list-unit-files| grep -q "^sshd.service"; then
     systemctl enable --now sshd
+    echo -e "${GREEN}✅ Служба sshd запущена${NC}"
 else
-    echo -e "${RED}⚠️ SSH сервис не найден, проверьте установку openssh${NC}"
+    echo -e "${RED}❌ SSH сервис не найден!${NC}"
 fi
 
-# Включаем Docker
+# Docker (обычно везде называется одинаково)
 systemctl enable --now docker
 
 
