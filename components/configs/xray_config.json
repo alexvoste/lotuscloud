@@ -1,0 +1,22 @@
+{
+	"log": { "loglevel": "warning" },
+	"routing": {
+		"domainStrategy": "AsIs",
+		"rules": [
+			{
+				"type": "field",
+				"outboundTag": "blocked",
+				"protocol": ["bittorrent"]
+			},
+			{
+				"type": "field",
+				"outboundTag": "blocked",
+				"port": "25, 465, 587"
+			}
+		]
+	},
+	"outbounds": [
+		{ "protocol": "freedom", "tag": "direct" },
+		{ "protocol": "blackhole", "tag": "blocked" }
+	]
+}

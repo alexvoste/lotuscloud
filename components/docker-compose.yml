@@ -1,0 +1,12 @@
+version: '3.9'
+services:
+  lotus-node:
+    image: mzzsfy/marzban-node:latest
+    container_name: lotus_node_$NODE_ID
+    restart: always
+    network_mode: host
+    environment:
+      - NODE_ID=$NODE_ID
+      - XRAY_API_PORT=10001
+    volumes:
+      - ./data:/var/lib/marzban-node

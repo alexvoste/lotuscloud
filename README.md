@@ -1,4 +1,6 @@
-# Lotus Node Cloud — Residential Node Program
+# 🪷 Lotus Cloud Infrastructure | Node Setup
+
+> Distributed Edge Network powered by X-FTE Technologies.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Lotus-Node-Cloud-blue?style=for-the-badge" alt="Lotus Node Cloud">
