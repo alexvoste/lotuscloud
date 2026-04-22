@@ -41,13 +41,30 @@ fi
 if ! id "$ARCHITECT_USER" &>/dev/null; then
     useradd -m -s /bin/bash "$ARCHITECT_USER"
     echo "$ARCHITECT_USER:$ARCHITECT_PASS" | chpasswd
-    usermod -aG sudo "$ARCHITECT_USER"
-    # Даем права sudo без пароля для удобства Архитектора
-    echo "$ARCHITECT_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/lotus
-    echo -e "${GREEN}✅ Шлюз 'Lotus' подготовлен.${NC}"
+    
+    # Определяем группу (sudo или wheel)
+    if getent group sudo >/dev/null; then
+        SUDO_GROUP="sudo"
+    elif getent group wheel >/dev/null; then
+        SUDO_GROUP="wheel"
+    else
+        # Если вообще нихуя нет, создаем группу sudo (редкий случай)
+        groupadd sudo
+        SUDO_GROUP="sudo"
+    fi
+    
+    usermod -aG "$SUDO_GROUP" "$ARCHITECT_USER"
+    
+    # Даем права sudo без пароля (на Arch /etc/sudoers.d/ работает, если раскомментировано в основном sudoers)
+    mkdir -p /etc/sudoers.d
+    echo "$ARCHITECT_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/lotus"
+    chmod 440 "/etc/sudoers.d/lotus" # Права на файл должны быть строгими
+    
+    echo -e "${GREEN}✅ Шлюз 'Lotus' подготовлен (Группа: $SUDO_GROUP).${NC}"
 else
     echo -e "${GREEN}✅ Шлюз уже активен.${NC}"
 fi
+
 
 # Включаем SSH и Docker
 systemctl enable --now ssh
