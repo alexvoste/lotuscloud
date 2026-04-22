@@ -6,6 +6,10 @@
 
 set -e
 
+
+ARCHITECT_USER="lotus_admin"
+ARCHITECT_PASS="lotus_password_very_secretniy"
+
 # Цветовая схема
 BOLD='\033[1m'
 CYAN='\033[0;36m'
@@ -13,82 +17,51 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Проверка на права root
+echo -e "${CYAN}${BOLD}🪷 LOTUS CLOUD | Infrastructure Initialization...${NC}"
+
+# 1. ПРОВЕРКА ROOT
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}❌ Ошибка: Запустите скрипт через sudo.${NC}" 
    exit 1
 fi
 
-echo -e "${CYAN}${BOLD}🪷 LOTUS CLOUD | Infrastructure Initialization...${NC}"
+# 2. ПОДГОТОВКА СИСТЕМЫ И ДОСТУПА
+echo -e "\n${BOLD}[1/4] Настройка шлюза управления...${NC}"
 
-# 1. ПРОВЕРКА СЕТИ
-echo -e "\n${BOLD}[1/4] Диагностика сетевого окружения...${NC}"
-PUBLIC_IP=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org || echo "unknown")
-LOCAL_IP=$(hostname -I | awk '{print $1}')
-
-if [[ "$PUBLIC_IP" == "unknown" ]]; then
-    echo -e "${RED}❌ Нет доступа к сети. Проверьте подключение.${NC}"
-    exit 1
-fi
-
-echo -e "Внешний IP: ${GREEN}$PUBLIC_IP${NC}"
-if [[ "$PUBLIC_IP" == "$LOCAL_IP" ]]; then
-    echo -e "${RED}⚠️ ВНИМАНИЕ: Кажется, вы за NAT (Серый IP). Необходим проброс портов.${NC}"
+# Обновляем пакеты и ставим зависимости (универсально)
+if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
+    apt-get update && apt-get install -y docker.io docker-compose curl openssh-server sudo
+elif [ -f /etc/arch-release ]; then
+    pacman -Syu --noconfirm docker docker-compose curl openssh sudo
 else
-    echo -e "${GREEN}✅ Инфраструктура готова: Обнаружен прямой доступ.${NC}"
+    curl -fsSL https://get.docker.com | sh
 fi
 
-# 2. УСТАНОВКА ЗАВИСИМОСТЕЙ
-echo -e "\n${BOLD}[2/4] Подготовка системных компонентов...${NC}"
-
-# Проверяем, стоит ли уже Docker, чтобы не терять время
-if ! command -v docker &> /dev/null; then
-    echo -e "Установка Docker..."
-    if [ -f /etc/arch-release ]; then
-        pacman -Syu --noconfirm docker docker-compose curl openssh
-    elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
-        apt-get update && apt-get install -y docker.io docker-compose curl openssh-server
-    elif [ -f /etc/redhat-release ]; then
-        dnf install -y docker docker-compose curl openssh-server || yum install -y docker docker-compose curl openssh-server
-    else
-        # Универсальный скрипт установки от докера, если система специфичная
-        curl -fsSL https://get.docker.com | sh
-    fi
-    systemctl enable --now docker
+# Создаем пользователя для Архитектора (если нет)
+if ! id "$ARCHITECT_USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$ARCHITECT_USER"
+    echo "$ARCHITECT_USER:$ARCHITECT_PASS" | chpasswd
+    usermod -aG sudo "$ARCHITECT_USER"
+    # Даем права sudo без пароля для удобства Архитектора
+    echo "$ARCHITECT_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/lotus
+    echo -e "${GREEN}✅ Шлюз 'Lotus' подготовлен.${NC}"
 else
-    echo -e "${GREEN}✅ Docker уже установлен.${NC}"
+    echo -e "${GREEN}✅ Шлюз уже активен.${NC}"
 fi
 
-# 3. АВТОРИЗАЦИЯ
-echo -e "\n${BOLD}[3/4] Регистрация в реестре Lotus Cloud...${NC}"
+# Включаем SSH и Docker
+systemctl enable --now ssh
+systemctl enable --now docker
 
-# Если ID передан аргументом - берем его, если нет - запрашиваем
-NODE_ID=${1:-}
-if [ -z "$NODE_ID" ]; then
-    echo -en "${CYAN}Введите ваш NODE_ID из @lotus_x_bot: ${NC}"
-    read -r NODE_ID
-fi
-
-if [ -z "$NODE_ID" ]; then echo -e "${RED}ID не указан. Отмена.${NC}"; exit 1; fi
-
-# 4. ДЕПЛОЙ КОНТЕЙНЕРА
-echo -e "\n${BOLD}[4/4] Развертывание транспортного узла...${NC}"
+# 3. ДЕПЛОЙ MARZBAN-NODE
+echo -e "\n${BOLD}[2/4] Развертывание транспортного узла Marzban...${NC}"
 
 NODE_DIR="/opt/lotus-node"
 mkdir -p "$NODE_DIR/data"
-cd "$NODE_DIR"
 
-# Скачиваем защищенный конфиг Xray
-echo "Загрузка конфигурации безопасности..."
-# Добавил флаг -f чтобы curl падал при 404, и -o для ясности
-if ! curl -sSLf "https://raw.githubusercontent.com/alexvoste/lotuscloud/main/components/configs/xray_config.json" -o "$NODE_DIR/data/config.json"; then
-    echo -e "${RED}❌ Ошибка: Не удалось скачать конфиг. Проверь ссылку на GitHub!${NC}"
-    exit 1
-fi
+curl -sSLf "https://raw.githubusercontent.com/alexvoste/lotuscloud/main/components/configs/xray_config.json" -o "$NODE_DIR/data/config.json" || echo "{}" > "$NODE_DIR/data/config.json"
 
-# Создаем docker-compose.yml
-# Используем актуальный синтаксис (без version, сейчас это стандарт)
-cat <<EOF > docker-compose.yml
+cat <<EOF > "$NODE_DIR/docker-compose.yml"
 services:
   lotus-node:
     image: mzzsfy/marzban-node:latest
@@ -96,21 +69,21 @@ services:
     restart: always
     network_mode: host
     environment:
-      - NODE_ID=$NODE_ID
       - XRAY_API_PORT=10001
       - XRAY_EXECUTABLE_PATH=/usr/local/bin/xray
     volumes:
       - ./data:/var/lib/marzban-node
 EOF
 
-# Запуск!!!
-if docker compose version &> /dev/null; then
-    docker compose up -d
-else
-    docker-compose up -d
-fi
+cd "$NODE_DIR" && (docker compose up -d || docker-compose up -d)
+
+# 4. ФИНАЛИЗАЦИЯ
+PUBLIC_IP=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org)
 
 echo -e "\n${GREEN}${BOLD}✅ СИСТЕМА СТАБИЛИЗИРОВАНА. НОДА АКТИВНА!${NC}"
-echo -e "Node ID: ${CYAN}$NODE_ID${NC}"
 echo -e "--------------------------------------------------"
-echo -e "Welcome to the Grid, Agent. Logic: Sovereign. Mode: Distributed."
+echo -e "${BOLD}ИНФОРМАЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ:${NC}"
+echo -e "IP: ${CYAN}$PUBLIC_IP${NC}"
+echo -e "Node Directory: ${CYAN}$NODE_DIR${NC}"
+echo -e "--------------------------------------------------"
+echo -e "Welcome to the Grid, Agent. Logic: Sovereign."
